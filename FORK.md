@@ -68,7 +68,7 @@ to the loopback fixture.
 4. Set matching versions in package.json and package-lock.json. Review the diff,
    local tests, seven binary checksums, package contents and Linux/Windows smoke.
 5. Merge without squash to preserve the individual fixes. Create a new immutable
-   tag matching the package version, for example `v2.0.5-ic.1`.
+   tag matching the package version, for example `v2.0.5-ic.2`.
 6. `ic-release.yml` publishes the packed artifact with provenance after all gates
    pass, then creates a GitHub Release containing the tarball and checksums.
    Publication and tags must never be overwritten.
