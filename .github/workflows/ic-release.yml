@@ -26,6 +26,10 @@ jobs:
             const message = [data?.code, data?.message, data?.error].filter((v) => typeof v === 'string').join(' ').toLowerCase();
             return ['not found', 'permission', 'trust', 'expired', 'audience', 'issuer', 'repository', 'workflow', 'environment', 'token', 'stage_required'].filter((value) => message.includes(value));
           };
+          const knownError = (data) => {
+            const expected = 'oidc token exchange error - package not found';
+            return [data?.message, data?.error].some((value) => typeof value === 'string' && value.trim().toLowerCase().replace(/\s+/g, ' ') === expected) ? 'OIDC token exchange error - package not found' : 'unrecognized_response';
+          };
           async function request(url, authorization, method = 'GET') {
             const response = await fetch(url, { method, redirect: 'error', signal: AbortSignal.timeout(15000), headers: { accept: 'application/json', authorization: `Bearer ${authorization}` } });
             const data = await response.json().catch(() => null);
@@ -43,7 +47,7 @@ jobs:
             emit({ phase: 'claims', claims: Object.fromEntries(keys.map((key) => [key, typeof claims[key] === 'string' ? claims[key] : null])), releasePackage: { name: packageName, version: '2.0.5-ic.3', sourceCommit: 'a29551249110168f077269775b11c2389fe64bff' }, diagnosticRefDiffersFromReleaseTag: true });
             if (claims.iss !== 'https://token.actions.githubusercontent.com' || claims.aud !== audience || claims.repository !== 'k0t0fey/CycleTLS' || claims.workflow_ref !== workflow) throw new Error('IDENTITY_MISMATCH');
             const exchange = await request('https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@k0t0fey%2fcycletls', identity.data.value, 'POST');
-            emit({ phase: 'npm_exchange', httpStatus: exchange.response.status, tokenIssued: typeof exchange.data?.token === 'string', tokenType: exchange.data?.token_type === 'oidc' ? 'oidc' : null, errorCategories: categories(exchange.data), provesPublishPermission: false });
+            emit({ phase: 'npm_exchange', httpStatus: exchange.response.status, tokenIssued: typeof exchange.data?.token === 'string', tokenType: exchange.data?.token_type === 'oidc' ? 'oidc' : null, errorCategories: categories(exchange.data), knownError: knownError(exchange.data), provesPublishPermission: false });
             if (exchange.response.status !== 201 || typeof exchange.data?.token !== 'string') process.exitCode = 1;
           })().catch(() => { emit({ phase: 'diagnostic', error: 'REQUEST_OR_IDENTITY_VALIDATION_FAILED' }); process.exitCode = 1; });
           NODE
