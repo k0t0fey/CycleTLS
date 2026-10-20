@@ -35,7 +35,9 @@ The changes are preserved as separate commits for upstream review and rebasing:
 - [Cover transport cancellation error envelopes and no-reuse cleanup](https://github.com/k0t0fey/CycleTLS/commit/5fddec306efd19bc0ef2baf532069c45b12c030a)
 - [Build and validate the scoped package with seven pinned helpers](https://github.com/k0t0fey/CycleTLS/commit/018764588133f03018667950047bf6fce996c93a)
 
-No release has been published yet. Publication follows the gated workflow below.
+The initial `2.0.5-ic.2` release is publicly available from npm and GitHub Releases.
+Its public package passed the Linux and Windows consumer checks.
+Publication follows the gated workflow below.
 
 ## Validation
 
@@ -62,13 +64,12 @@ to the loopback fixture.
    settings before pushing branches or syncing main. Keep `ic-release.yml`
    enabled. This repository setting cannot be enforced by source files.
 3. Confirm the intended npm scope, repository ownership and public access.
-   Store a short-lived granular npm token restricted to this package in the
-   repository secret `CYCLETLS`, which supplies `NODE_AUTH_TOKEN` only to publish.
-   After the first release, configure npm trusted publishing and remove it.
+   After the initial package exists, configure npm trusted publishing as
+   described below. The release workflow uses OIDC without an npm secret.
 4. Set matching versions in package.json and package-lock.json. Review the diff,
    local tests, seven binary checksums, package contents and Linux/Windows smoke.
 5. Merge without squash to preserve the individual fixes. Create a new immutable
-   tag matching the package version, for example `v2.0.5-ic.2`.
+   tag matching the package version, for example `v2.0.5-ic.3`.
 6. `ic-release.yml` publishes the packed artifact with provenance after all gates
    pass, then creates a GitHub Release containing the tarball and checksums.
    Publication and tags must never be overwritten.
@@ -91,6 +92,44 @@ credential cleanup cannot be used at the end of the checkout step.
 Consumers do not need Go or a package lifecycle build script. FORK.md is explicitly
 included alongside `/dist` in the npm files list because npm does not include
 arbitrary Markdown automatically; LICENSE is also verified in the tarball.
+
+## Trusted publishing after the initial release
+
+In npm package settings for `@k0t0fey/cycletls`, add a GitHub Actions trusted
+publisher: user `k0t0fey`, repository `CycleTLS`, workflow filename
+`ic-release.yml` (without its directory). Leave Environment empty while the
+workflow has no deployment environment. Explicitly allow `npm publish`;
+new configurations default to staged publishing, which this workflow does
+not use. Dist-tag management permission is unnecessary.
+
+The publish job alone uses Node 24 and pinned npm 11.21.0. OIDC requires npm
+11.5.1+ and Node 22.14.0+. Build and consumer validation remain on Node 20.
+Keep `id-token: write`, existing release gates and the exact checked tarball.
+Explicit `--tag latest` is needed for the `-ic.N` prerelease versions on npm 11.
+`--provenance` remains explicit; `NODE_AUTH_TOKEN` is not supplied.
+
+Create the trust configuration when the next approved release is ready:
+its first successful OIDC publish must occur within two days, otherwise the
+configuration expires and must be recreated. Do not invent a version or
+overwrite an existing release just to validate OIDC.
+
+Saving the setting, `npm whoami`, or a successful `npm publish --dry-run`
+does not prove publishing works. A package-scoped OIDC token exchange would
+only check authentication, not publishing permission or the first-publish
+deadline. No such diagnostic job is required. The next approved real OIDC
+release and its public consumer jobs provide the end-to-end validation.
+
+After successful migration, remove the bootstrap `CYCLETLS` GitHub secret,
+revoke its npm token, and set npm Publishing access to
+`Require two-factor authentication and disallow tokens`. OIDC remains enabled.
+The release job has no token fallback; do not keep an unused bootstrap token
+after verifying the transition. The temporary `ic-stage-diagnostic.yml` workflow
+was removed because it used that bootstrap token and did not validate OIDC.
+Read-only public
+consumer checks remain available without npm credentials.
+See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/),
+[npm OIDC exchange API](https://api-docs.npmjs.com/), and
+[npm 11 prerelease tag checks](https://github.com/npm/cli/blob/v11.21.0/lib/commands/publish.js#L118-L122).
 
 ## Updating upstream
 
