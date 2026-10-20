@@ -25,8 +25,8 @@ type roundTripper struct {
 	sync.Mutex
 
 	// Per-address mutexes for preventing concurrent transport creation
-	addressMutexes    map[string]*sync.Mutex
-	addressMutexLock  sync.Mutex
+	addressMutexes   map[string]*sync.Mutex
+	addressMutexLock sync.Mutex
 
 	// TLS fingerprinting options
 	JA3              string
@@ -55,7 +55,8 @@ type roundTripper struct {
 	cachedConnections map[string]net.Conn
 	cachedTransports  map[string]http.RoundTripper
 
-	dialer proxy.ContextDialer
+	dialer      proxy.ContextDialer
+	dialTimeout time.Duration
 }
 
 func (rt *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -221,8 +222,15 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 	// Establish raw connection
 	rawConn, err := rt.dialer.DialContext(ctx, network, addr)
 	if err != nil {
-		return nil, err
+		return nil, wrapTransportPhase("tcp_connect", err)
 	}
+	// Close on every failed preset/handshake path; successful connections transfer ownership.
+	keepConn := false
+	defer func() {
+		if !keepConn {
+			_ = rawConn.Close()
+		}
+	}()
 
 	// Extract host from address
 	var host string
@@ -285,7 +293,7 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 	}
 
 	// Perform TLS handshake
-	if err = conn.Handshake(); err != nil {
+	if err = conn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
 
 		if err.Error() == "tls: CurvePreferences includes unsupported curve" {
@@ -302,11 +310,12 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 			return rt.retryWithOriginalTLS12JA3(ctx, network, addr, host)
 		}
 
-		return nil, fmt.Errorf("uTlsConn.Handshake() error: %+v", err)
+		return nil, wrapTransportPhase("tls_handshake", err)
 	}
 
 	// If transport already exists, return connection
 	if rt.cachedTransports[addr] != nil {
+		keepConn = true
 		return conn, nil
 	}
 
@@ -351,6 +360,7 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 	}
 
 	// Cache the connection for future use
+	keepConn = true
 	rt.cachedConnections[addr] = conn
 
 	return nil, errProtocolNegotiated
@@ -361,8 +371,15 @@ func (rt *roundTripper) retryWithTLS13CompatibleCurves(ctx context.Context, netw
 	// Establish raw connection for retry
 	rawConn, err := rt.dialer.DialContext(ctx, network, addr)
 	if err != nil {
-		return nil, err
+		return nil, wrapTransportPhase("tcp_connect", err)
 	}
+	// Close on every failed preset/handshake path; successful connections transfer ownership.
+	keepConn := false
+	defer func() {
+		if !keepConn {
+			_ = rawConn.Close()
+		}
+	}()
 
 	var spec *utls.ClientHelloSpec
 
@@ -406,9 +423,9 @@ func (rt *roundTripper) retryWithTLS13CompatibleCurves(ctx context.Context, netw
 	}
 
 	// Perform TLS handshake for retry
-	if err = conn.Handshake(); err != nil {
+	if err = conn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("TLS 1.3 compatible handshake failed: %+v", err)
+		return nil, wrapTransportPhase("tls_handshake", err)
 	}
 
 	// Create appropriate transport based on negotiated protocol
@@ -448,6 +465,7 @@ func (rt *roundTripper) retryWithTLS13CompatibleCurves(ctx context.Context, netw
 		}
 	}
 
+	keepConn = true
 	// Cache the successful TLS 1.3 connection
 	rt.cachedConnections[addr] = conn
 
@@ -459,8 +477,15 @@ func (rt *roundTripper) retryWithOriginalTLS12JA3(ctx context.Context, network, 
 	// Establish raw connection for fallback to original TLS 1.2 JA3
 	rawConn, err := rt.dialer.DialContext(ctx, network, addr)
 	if err != nil {
-		return nil, err
+		return nil, wrapTransportPhase("tcp_connect", err)
 	}
+	// Close on every failed preset/handshake path; successful connections transfer ownership.
+	keepConn := false
+	defer func() {
+		if !keepConn {
+			_ = rawConn.Close()
+		}
+	}()
 
 	// Use original TLS 1.2 JA3 spec (no upgrade)
 	spec, err := StringToSpec(rt.JA3, rt.UserAgent, rt.ForceHTTP1)
@@ -481,9 +506,9 @@ func (rt *roundTripper) retryWithOriginalTLS12JA3(ctx context.Context, network, 
 	}
 
 	// Perform TLS handshake for fallback
-	if err = conn.Handshake(); err != nil {
+	if err = conn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("original TLS 1.2 handshake failed: %+v", err)
+		return nil, wrapTransportPhase("tls_handshake", err)
 	}
 
 	// Create appropriate transport based on negotiated protocol
@@ -523,6 +548,7 @@ func (rt *roundTripper) retryWithOriginalTLS12JA3(ctx context.Context, network, 
 		}
 	}
 
+	keepConn = true
 	// Cache the successful TLS 1.2 fallback connection
 	rt.cachedConnections[addr] = conn
 
@@ -530,7 +556,14 @@ func (rt *roundTripper) retryWithOriginalTLS12JA3(ctx context.Context, network, 
 }
 
 func (rt *roundTripper) dialTLSHTTP2(network, addr string, _ *utls.Config) (net.Conn, error) {
-	return rt.dialTLS(context.Background(), network, addr)
+	timeout := rt.dialTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	// fhttp/http2 DialTLS has no context parameter. Bound its detached redial explicitly.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return rt.dialTLS(ctx, network, addr)
 }
 
 func (rt *roundTripper) getDialTLSAddr(req *http.Request) string {
@@ -545,15 +578,15 @@ func (rt *roundTripper) getDialTLSAddr(req *http.Request) string {
 func (rt *roundTripper) getAddressMutex(addr string) *sync.Mutex {
 	rt.addressMutexLock.Lock()
 	defer rt.addressMutexLock.Unlock()
-	
+
 	if rt.addressMutexes == nil {
 		rt.addressMutexes = make(map[string]*sync.Mutex)
 	}
-	
+
 	if mu, exists := rt.addressMutexes[addr]; exists {
 		return mu
 	}
-	
+
 	mu := &sync.Mutex{}
 	rt.addressMutexes[addr] = mu
 	return mu

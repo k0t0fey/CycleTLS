@@ -1,11 +1,12 @@
 {
-  "name": "cycletls",
-  "version": "2.0.5",
+  "name": "@k0t0fey/cycletls",
+  "version": "2.0.5-ic.1",
   "description": "Spoof TLS/JA3 fingerprint in JS with help from Go",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "/dist"
+    "/dist",
+    "/FORK.md"
   ],
   "author": "Danny-Dasilva",
   "scripts": {
@@ -18,13 +19,14 @@
     "build:go:windows:amd64": " cd src && cross-env GO111MODULE=on GOOS=windows  GOARCH=amd64  go build -o ../dist/index.exe      ./",
     "build:go": "concurrently npm:build:go:*",
     "build": "tsc",
-    "prebuild:go": "cd src && cross-env GO111MODULE=on go get github.com/Danny-Dasilva/CycleTLS/cycletls",
-    "prepare": "npm run build && npm run build:go",
-    "test": "jest --detectOpenHandles"
+    "test": "jest --detectOpenHandles",
+    "build:native": "node scripts/build-native.mjs",
+    "smoke:local": "node scripts/smoke-local.cjs",
+    "verify:pack": "node scripts/verify-pack.mjs"
   },
   "repository": {
     "type": "git",
-    "directory": "git+https://github.com/Danny-Dasilva/CycleTLS.git"
+    "url": "https://github.com/k0t0fey/CycleTLS"
   },
   "keywords": [
     "cycletls",
@@ -34,14 +36,14 @@
     "fingerprint",
     "mimic"
   ],
-  "license": "GPL3",
+  "license": "GPL-3.0-only",
   "bugs": {
-    "url": "https://github.com/Danny-Dasilva/CycleTLS/issues"
+    "url": "https://github.com/k0t0fey/CycleTLS/issues"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "homepage": "https://github.com/Danny-Dasilva/CycleTLS#readme",
+  "homepage": "https://github.com/k0t0fey/CycleTLS#readme",
   "dependencies": {
     "@types/node": "^20.14.0",
     "form-data": "^4.0.0",
@@ -60,5 +62,8 @@
     "jsdom": "^24.1.0",
     "ts-jest": "^29.1.4",
     "typescript": "^5.4.5"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

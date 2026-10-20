@@ -2,6 +2,8 @@ module github.com/Danny-Dasilva/CycleTLS
 
 go 1.22.6
 
+toolchain go1.24.13
+
 require (
 	github.com/Danny-Dasilva/CycleTLS/cycletls v1.0.26 // indirect
 	github.com/Danny-Dasilva/fhttp v0.0.0-20240217042913-eeeb0b347ce1 // indirect

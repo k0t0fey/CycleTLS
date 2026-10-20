@@ -631,7 +631,11 @@ func dispatcherAsync(res fullRequest, chanWrite chan []byte) {
 	defer func() {
 		// Use type assertion to access the roundTripper
 		if transport, ok := res.client.Transport.(*roundTripper); ok {
-			transport.CloseIdleConnections(hostPort)
+			if res.options.Options.EnableConnectionReuse {
+				transport.CloseIdleConnections(hostPort)
+			} else {
+				transport.CloseIdleConnections()
+			}
 		}
 	}()
 
@@ -655,7 +659,7 @@ func dispatcherAsync(res fullRequest, chanWrite chan []byte) {
 			b.WriteByte(byte(parsedError.StatusCode >> 8))
 			b.WriteByte(byte(parsedError.StatusCode))
 
-			var message = parsedError.ErrorMsg + "-> \n" + string(err.Error())
+			var message = parsedError.ErrorMsg
 			var messageLength = len(message)
 
 			b.WriteByte(byte(messageLength >> 8))
@@ -1445,7 +1449,7 @@ func (client CycleTLS) Do(URL string, options Options, Method string) (Response,
 		parsedError := parseError(err)
 		return Response{
 			Status: parsedError.StatusCode,
-			Body:   parsedError.ErrorMsg + " -> " + err.Error(),
+			Body:   parsedError.ErrorMsg,
 		}, nil
 	}
 	defer resp.Body.Close()
