@@ -188,16 +188,21 @@ func (c *connectDialer) DialContext(ctx context.Context, network, address string
 		req.ProtoMajor = 1
 		req.ProtoMinor = 1
 
+		stop := closeConnOnCancellation(ctx, rawConn)
+		defer stop()
 		err := req.Write(rawConn)
 		if err != nil {
 			_ = rawConn.Close()
-			return nil, err
+			return nil, wrapTransportPhase("proxy_connect", err)
 		}
 
 		resp, err := http.ReadResponse(bufio.NewReader(rawConn), req)
 		if err != nil {
 			_ = rawConn.Close()
-			return nil, err
+			if ctx.Err() != nil {
+				err = ctx.Err()
+			}
+			return nil, wrapTransportPhase("proxy_connect", err)
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -235,7 +240,7 @@ func (c *connectDialer) DialContext(ctx context.Context, network, address string
 	case "http":
 		rawConn, err = c.Dialer.DialContext(ctx, network, c.ProxyURL.Host)
 		if err != nil {
-			return nil, err
+			return nil, wrapTransportPhase("tcp_connect", err)
 		}
 	case "https":
 		if c.DialTLS != nil {
@@ -249,11 +254,13 @@ func (c *connectDialer) DialContext(ctx context.Context, network, address string
 				ServerName:         c.ProxyURL.Hostname(),
 				InsecureSkipVerify: true,
 			}
-			tlsConn, err := tls.Dial(network, c.ProxyURL.Host, &tlsConf)
+			tlsDialer := &tls.Dialer{NetDialer: &net.Dialer{}, Config: &tlsConf}
+			rawTLSConn, err := tlsDialer.DialContext(ctx, network, c.ProxyURL.Host)
 			if err != nil {
-				return nil, err
+				return nil, wrapTransportPhase("proxy_connect", err)
 			}
-			err = tlsConn.Handshake()
+			tlsConn := rawTLSConn.(*tls.Conn)
+			err = tlsConn.HandshakeContext(ctx)
 			if err != nil {
 				return nil, err
 			}
