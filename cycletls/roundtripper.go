@@ -55,7 +55,8 @@ type roundTripper struct {
 	cachedConnections map[string]net.Conn
 	cachedTransports  map[string]http.RoundTripper
 
-	dialer proxy.ContextDialer
+	dialer      proxy.ContextDialer
+	dialTimeout time.Duration
 }
 
 func (rt *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -555,7 +556,14 @@ func (rt *roundTripper) retryWithOriginalTLS12JA3(ctx context.Context, network, 
 }
 
 func (rt *roundTripper) dialTLSHTTP2(network, addr string, _ *utls.Config) (net.Conn, error) {
-	return rt.dialTLS(context.Background(), network, addr)
+	timeout := rt.dialTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	// fhttp/http2 DialTLS has no context parameter. Bound its detached redial explicitly.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return rt.dialTLS(ctx, network, addr)
 }
 
 func (rt *roundTripper) getDialTLSAddr(req *http.Request) string {
