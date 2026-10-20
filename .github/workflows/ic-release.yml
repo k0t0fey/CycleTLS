@@ -132,7 +132,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          # Upstream has a gitlink without .gitmodules; checkout's recursive
+          # credential removal fails. Clear the main checkout token explicitly.
+          persist-credentials: true
+      - name: Remove checkout credentials before consumer installation
+        run: node scripts/clear-checkout-auth.cjs
       - uses: actions/setup-node@v4
         with:
           node-version: '20'

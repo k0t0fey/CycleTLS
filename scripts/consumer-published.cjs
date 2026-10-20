@@ -7,6 +7,11 @@ const childProcess = require("node:child_process");
 const { createRequire } = require("node:module");
 const smoke = require("./smoke-local.cjs");
 const metadata = require("../package.json");
+const version = process.env.CYCLETLS_CONSUMER_VERSION || metadata.version;
+assert(
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(version),
+  "Consumer version must be an exact npm version"
+);
 
 const helpers = [
   "index",
@@ -19,7 +24,7 @@ const helpers = [
 ];
 
 function installPublicPackage(directory) {
-  const alias = `npm:${metadata.name}@${metadata.version}`;
+  const alias = `npm:${metadata.name}@${version}`;
   fs.writeFileSync(
     path.join(directory, "package.json"),
     JSON.stringify({
@@ -75,11 +80,11 @@ function verifyPackage(directory) {
   );
   const installed = consumerRequire("cycletls/package.json");
   assert.equal(installed.name, metadata.name);
-  assert.equal(installed.version, metadata.version);
+  assert.equal(installed.version, version);
   const lock = JSON.parse(fs.readFileSync(path.join(directory, "package-lock.json"), "utf8"));
   const locked = lock.packages["node_modules/cycletls"];
   assert.equal(locked.name, metadata.name);
-  assert.equal(locked.version, metadata.version);
+  assert.equal(locked.version, version);
   assert(locked.integrity?.startsWith("sha512-"), "Missing package integrity");
   const checksums = new Map();
   for (const line of fs
@@ -134,7 +139,7 @@ async function main() {
     await smoke(init);
     assert.equal(launches, 1, "Expected one helper for all ten HTTPS requests");
     console.log(
-      `PASS: public ${metadata.name}@${metadata.version}, exact alias, clean npm ci, signatures, seven checksums, one helper`
+      `PASS: public ${metadata.name}@${version}, exact alias, clean npm ci, signatures, seven checksums, one helper`
     );
   } finally {
     clearTimeout(deadline);
