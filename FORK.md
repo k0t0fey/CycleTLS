@@ -80,6 +80,14 @@ to the loopback fixture.
    run after publication; failure requires investigation, never overwriting the
    released version. Consumers use the same exact alias and signature check.
 
+`ic-consumer.yml` independently targets `2.0.5-ic.2` on pushes and pull requests,
+and accepts an exact published version when dispatched. Registry availability
+is required; a staging-only package cannot pass public installation checks.
+It never publishes or changes a release tag. Consumer checkouts remove and
+verify the local GitHub HTTP credential before running npm: upstream's
+`reference/ja3` gitlink has no `.gitmodules` URL, so checkout's recursive
+credential cleanup cannot be used at the end of the checkout step.
+
 Consumers do not need Go or a package lifecycle build script. FORK.md is explicitly
 included alongside `/dist` in the npm files list because npm does not include
 arbitrary Markdown automatically; LICENSE is also verified in the tarball.

@@ -1,0 +1,36 @@
+name: Published package acceptance
+on:
+  push:
+    branches: ['ic/*', 'codex/consumer-checkout']
+  pull_request:
+    branches: ['ic/*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact published npm version to verify
+        required: true
+        default: '2.0.5-ic.2'
+permissions:
+  contents: read
+jobs:
+  public-consumer:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      CYCLETLS_CONSUMER_VERSION: ${{ inputs.version || '2.0.5-ic.2' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Avoid checkout's recursive cleanup of upstream's incomplete gitlink.
+          persist-credentials: true
+      - name: Remove checkout credentials before consumer installation
+        run: node scripts/clear-checkout-auth.cjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install and verify the public package without npm credentials
+        run: node scripts/consumer-published.cjs
