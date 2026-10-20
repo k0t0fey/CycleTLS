@@ -1,20 +1,18 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "declaration": true,
-    "declarationDir": "./dist",
-    "outDir": "./dist",
-    "noImplicitAny": true,
-    "esModuleInterop": true,
-    "types": [
-      "node"
+    "compilerOptions": {
+      "target": "ES2022",
+      "types": ["node"],
+      "module": "NodeNext",
+      "declaration": true,
+      "declarationDir": "./dist",
+      "outDir": "./dist",
+      "noImplicitAny": true,
+      "esModuleInterop": true,
+    },
+    "include": [
+      "src/**/*"
+    ],
+    "exclude": [
+      "dist/"
     ]
-  },
-  "include": [
-    "src/**/*"
-  ],
-  "exclude": [
-    "dist/"
-  ]
-}
+  }
