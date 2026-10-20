@@ -1,143 +1,49 @@
-name: Fork validation and release
+name: Inspect npm OIDC exchange
 on:
   push:
-    branches: ['ic/*']
-    tags: ['v*-ic.*']
-  pull_request:
-    branches: ['ic/*']
-permissions:
-  contents: read
-env:
-  GOTOOLCHAIN: local
-  CGO_ENABLED: '0'
+    branches: ['codex/oidc-diagnostic']
+permissions: {}
 jobs:
-  test:
+  inspect:
+    if: github.repository == 'k0t0fey/CycleTLS'
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.13'
-          cache-dependency-path: cycletls/go.sum
-      - run: test "$(go env GOVERSION)" = go1.24.13
-      - run: go test ./... -count=1 -timeout=90s
-        working-directory: cycletls
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-      - run: npm ci
-      - run: npx tsc
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.13'
-          cache-dependency-path: src/go.sum
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-      - run: npm ci
-      - run: npx tsc
-      - run: node scripts/build-native.mjs
-      - name: Verify reproducible native builds
-        run: |
-          cp dist/checksums.txt expected-checksums.txt
-          node scripts/build-native.mjs
-          cmp expected-checksums.txt dist/checksums.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: distribution
-          path: dist/
-  smoke:
-    needs: build
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-      - run: npm ci
-      - uses: actions/download-artifact@v4
-        with:
-          name: distribution
-          path: dist/
-      - if: runner.os != 'Windows'
-        run: chmod +x dist/index
-      - run: node scripts/smoke-local.cjs
-  pack:
-    needs: smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-      - run: npm ci
-      - uses: actions/download-artifact@v4
-        with:
-          name: distribution
-          path: dist/
-      - run: chmod +x dist/index dist/index-arm dist/index-arm64 dist/index-mac dist/index-mac-arm64 dist/index-freebsd
-      - run: npm pack --json > pack.json
-      - run: node scripts/verify-pack.mjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: npm-package
-          path: |
-            *.tgz
-            dist/checksums.txt
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-ic.')
-    needs: pack
-    runs-on: ubuntu-latest
+    timeout-minutes: 3
     permissions:
-      contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: https://registry.npmjs.org
-      - run: npm install --global npm@11.21.0
-      - name: Verify tag and package version
-        run: node -e 'if(process.env.GITHUB_REF_NAME !== "v"+require("./package.json").version)process.exit(1)'
-      - uses: actions/download-artifact@v4
-        with:
-          name: npm-package
-          path: release/
-      - run: npm publish ./release/*.tgz --provenance --access public --tag latest
-      - run: gh release create "$GITHUB_REF_NAME" release/*.tgz release/dist/checksums.txt --verify-tag --generate-notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-  consumer:
-    needs: publish
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Upstream has a gitlink without .gitmodules; checkout's recursive
-          # credential removal fails. Clear the main checkout token explicitly.
-          persist-credentials: true
-      - name: Remove checkout credentials before consumer installation
-        run: node scripts/clear-checkout-auth.cjs
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install and verify the public package without npm credentials
-        run: node scripts/consumer-published.cjs
+      - name: Inspect OIDC claims and exact package token exchange without publishing
+        shell: bash
+        run: |
+          node <<'NODE'
+          const emit = (result) => console.log(JSON.stringify(result));
+          const audience = 'npm:registry.npmjs.org';
+          const packageName = '@k0t0fey/cycletls';
+          const workflow = 'k0t0fey/CycleTLS/.github/workflows/ic-release.yml@refs/heads/codex/oidc-diagnostic';
+          const categories = (data) => {
+            const message = [data?.code, data?.message, data?.error].filter((v) => typeof v === 'string').join(' ').toLowerCase();
+            return ['not found', 'permission', 'trust', 'expired', 'audience', 'issuer', 'repository', 'workflow', 'environment', 'token', 'stage_required'].filter((value) => message.includes(value));
+          };
+          async function request(url, authorization, method = 'GET') {
+            const response = await fetch(url, { method, redirect: 'error', signal: AbortSignal.timeout(15000), headers: { accept: 'application/json', authorization: `Bearer ${authorization}` } });
+            const data = await response.json().catch(() => null);
+            return { response, data };
+          }
+          (async () => {
+            const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+            if (url.protocol !== 'https:') throw new Error('INVALID_IDENTITY_URL');
+            url.searchParams.set('audience', audience);
+            const identity = await request(url, process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
+            emit({ phase: 'github_identity', httpStatus: identity.response.status, tokenPresent: typeof identity.data?.value === 'string' });
+            if (!identity.response.ok || !identity.data?.value) throw new Error('IDENTITY_UNAVAILABLE');
+            const claims = JSON.parse(Buffer.from(identity.data.value.split('.')[1], 'base64url').toString('utf8'));
+            const keys = ['iss', 'aud', 'sub', 'repository', 'repository_id', 'repository_owner', 'repository_owner_id', 'ref', 'sha', 'workflow_ref', 'workflow_sha', 'job_workflow_ref', 'job_workflow_sha', 'environment', 'runner_environment', 'event_name'];
+            emit({ phase: 'claims', claims: Object.fromEntries(keys.map((key) => [key, typeof claims[key] === 'string' ? claims[key] : null])), releasePackage: { name: packageName, version: '2.0.5-ic.3', sourceCommit: 'a29551249110168f077269775b11c2389fe64bff' }, diagnosticRefDiffersFromReleaseTag: true });
+            if (claims.iss !== 'https://token.actions.githubusercontent.com' || claims.aud !== audience || claims.repository !== 'k0t0fey/CycleTLS' || claims.workflow_ref !== workflow) throw new Error('IDENTITY_MISMATCH');
+            const exchange = await request('https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@k0t0fey%2fcycletls', identity.data.value, 'POST');
+            emit({ phase: 'npm_exchange', httpStatus: exchange.response.status, tokenIssued: typeof exchange.data?.token === 'string', tokenType: exchange.data?.token_type === 'oidc' ? 'oidc' : null, errorCategories: categories(exchange.data), provesPublishPermission: false });
+            if (exchange.response.status !== 201 || typeof exchange.data?.token !== 'string') process.exitCode = 1;
+          })().catch(() => { emit({ phase: 'diagnostic', error: 'REQUEST_OR_IDENTITY_VALIDATION_FAILED' }); process.exitCode = 1; });
+          NODE
