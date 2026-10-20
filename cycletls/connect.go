@@ -24,8 +24,28 @@ type SocksDialer struct {
 	socksDial func(string, string) (net.Conn, error)
 }
 
-func (d *SocksDialer) DialContext(_ context.Context, network, addr string) (net.Conn, error) {
-	return d.socksDial(network, addr)
+func (d *SocksDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	type result struct {
+		conn net.Conn
+		err  error
+	}
+	ready := make(chan result)
+	go func() {
+		conn, err := d.socksDial(network, addr)
+		select {
+		case ready <- result{conn, err}:
+		case <-ctx.Done():
+			if conn != nil {
+				_ = conn.Close()
+			}
+		}
+	}()
+	select {
+	case result := <-ready:
+		return result.conn, result.err
+	case <-ctx.Done():
+		return nil, wrapTransportPhase("proxy_connect", ctx.Err())
+	}
 }
 
 func (d *SocksDialer) Dial(network, addr string) (net.Conn, error) {
