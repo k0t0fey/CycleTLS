@@ -23,6 +23,53 @@ const helpers = [
   "index-freebsd",
 ];
 
+async function waitForPublicVersion({
+  fetchImpl = fetch,
+  now = () => performance.now(),
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  const deadline = now() + 15 * 60 * 1000;
+  const url = `https://registry.npmjs.org/${encodeURIComponent(metadata.name)}/${version}`;
+  let lastResult = "not requested";
+  console.log(`Waiting up to 15 minutes for public ${metadata.name}@${version}`);
+  while (now() < deadline) {
+    const nextPoll = now() + 30000;
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method: "GET",
+        headers: { accept: "application/json" },
+        redirect: "error",
+        signal: AbortSignal.timeout(Math.max(1, Math.ceil(Math.min(15000, deadline - now())))),
+      });
+      lastResult = `HTTP ${response.status}`;
+      if (response.ok) {
+        const published = await response.json();
+        if (published?.name === metadata.name && published?.version === version) {
+          if (now() >= deadline) break;
+          console.log(`Public ${metadata.name}@${version} is available`);
+          return;
+        }
+        lastResult = "exact version missing from metadata";
+      } else {
+        await response.body?.cancel();
+      }
+    } catch {
+      // Keep network/JSON failures retryable without logging response bodies.
+      lastResult = "request or metadata error";
+    }
+    if (response && !response.ok && response.status !== 404 && response.status < 500) {
+      throw new Error(`Public registry rejected availability check: HTTP ${response.status}`);
+    }
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
+    await sleep(Math.min(Math.max(0, nextPoll - now()), remaining));
+  }
+  throw new Error(
+    `Public ${metadata.name}@${version} unavailable after 15 minutes (${lastResult})`
+  );
+}
+
 function installPublicPackage(directory) {
   const alias = `npm:${metadata.name}@${version}`;
   fs.writeFileSync(
@@ -121,6 +168,7 @@ function verifyPackage(directory) {
 async function main() {
   assert(["win32", "linux"].includes(process.platform));
   assert.equal(process.arch, "x64");
+  await waitForPublicVersion();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cycletls-consumer-"));
   installPublicPackage(directory);
   const { init, executable } = verifyPackage(directory);
@@ -147,7 +195,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exitCode = 1;
-});
+module.exports = { waitForPublicVersion };
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exitCode = 1;
+  });
+}
