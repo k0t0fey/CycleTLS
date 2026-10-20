@@ -3,13 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
 const http2 = require('node:http2');
-const init = require('../dist/index.js');
 const delay = ms => new Promise(resolve=>setTimeout(resolve,ms));
 const listen = server => new Promise((resolve,reject)=>{
   server.once('error',reject);
   server.listen(0,'127.0.0.1',()=>resolve(server.address().port));
 });
-async function run(){
+async function run(init = require('../dist/index.js')){
   const sockets=new Set();
   const server=http2.createSecureServer({
     key:fs.readFileSync(path.join(__dirname,'../tests/key.pem')),
@@ -43,5 +42,8 @@ async function run(){
     await new Promise(resolve=>server.close(resolve));
   }
 }
-const deadline=setTimeout(()=>{console.error('Loopback smoke exceeded 30 seconds');process.exit(1);},30000);
-run().catch(error=>{console.error(error);process.exitCode=1;}).finally(()=>clearTimeout(deadline));
+module.exports = run;
+if(require.main === module){
+  const deadline=setTimeout(()=>{console.error('Loopback smoke exceeded 30 seconds');process.exit(1);},30000);
+  run().catch(error=>{console.error(error);process.exitCode=1;}).finally(()=>clearTimeout(deadline));
+}

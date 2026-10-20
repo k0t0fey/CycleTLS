@@ -62,7 +62,8 @@ to the loopback fixture.
    settings before pushing branches or syncing main. Keep `ic-release.yml`
    enabled. This repository setting cannot be enforced by source files.
 3. Confirm the intended npm scope, repository ownership and public access.
-   Configure a short-lived granular `NPM_TOKEN` restricted to this package.
+   Store a short-lived granular npm token restricted to this package in the
+   repository secret `CYCLETLS`, which supplies `NODE_AUTH_TOKEN` only to publish.
    After the first release, configure npm trusted publishing and remove it.
 4. Set matching versions in package.json and package-lock.json. Review the diff,
    local tests, seven binary checksums, package contents and Linux/Windows smoke.
@@ -71,7 +72,13 @@ to the loopback fixture.
 6. `ic-release.yml` publishes the packed artifact with provenance after all gates
    pass, then creates a GitHub Release containing the tarball and checksums.
    Publication and tags must never be overwritten.
-7. Consumers use an exact npm alias and verify with `npm audit signatures`.
+7. The `consumer` jobs install the public version on Linux and Windows without
+   npm credentials in an isolated temporary project. They generate a lock for
+   the exact npm alias, run a clean `npm ci` and `npm audit signatures`, verify
+   all seven packaged SHA256 checksums, and perform ten localhost HTTPS requests
+   through one SDK-selected helper with no surviving connections. These checks
+   run after publication; failure requires investigation, never overwriting the
+   released version. Consumers use the same exact alias and signature check.
 
 Consumers do not need Go or a package lifecycle build script. FORK.md is explicitly
 included alongside `/dist` in the npm files list because npm does not include

@@ -117,7 +117,24 @@ jobs:
           path: release/
       - run: npm publish release/*.tgz --provenance --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.CYCLETLS }}
       - run: gh release create "$GITHUB_REF_NAME" release/*.tgz release/dist/checksums.txt --verify-tag --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+  consumer:
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install and verify the public package without npm credentials
+        run: node scripts/consumer-published.cjs
