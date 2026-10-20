@@ -631,7 +631,11 @@ func dispatcherAsync(res fullRequest, chanWrite chan []byte) {
 	defer func() {
 		// Use type assertion to access the roundTripper
 		if transport, ok := res.client.Transport.(*roundTripper); ok {
-			transport.CloseIdleConnections(hostPort)
+			if res.options.Options.EnableConnectionReuse {
+				transport.CloseIdleConnections(hostPort)
+			} else {
+				transport.CloseIdleConnections()
+			}
 		}
 	}()
 
