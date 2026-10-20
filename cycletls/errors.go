@@ -2,10 +2,11 @@ package cycletls
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -17,14 +18,24 @@ type errorMessage struct {
 	Op         string
 }
 
+// Remove URL userinfo before errors reach the SDK, logs or debug output.
+var errorURLUserinfo = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^/\s]*@`)
+
+func safeErrorText(err error) string {
+	if err == nil {
+		return "unknown transport error"
+	}
+	return errorURLUserinfo.ReplaceAllString(err.Error(), "${1}[redacted]@")
+}
+
 func lastString(ss []string) string {
 	return ss[len(ss)-1]
 }
 
 // func createErrorString(err: string) (msg, debugger string) {
 func createErrorString(err error) (msg, debugger string) {
-	msg = fmt.Sprintf("Request returned a Syscall Error: %s", err)
-	debugger = fmt.Sprintf("%#v\n", err)
+	msg = fmt.Sprintf("Request returned a Syscall Error: %s", safeErrorText(err))
+	debugger = safeErrorText(err)
 	return
 }
 
@@ -34,23 +45,37 @@ func createErrorMessage(StatusCode int, err error, op string) errorMessage {
 	// For timeout errors, provide a clean, user-friendly message
 	if op == "timeout" {
 		msg = "Request timeout: deadline exceeded"
+		var phased *transportPhaseError
+		if errors.As(err, &phased) {
+			msg += "; cycletls_phase=" + phased.phase
+		}
 	} else {
 		// For other errors, provide detailed debugging information
-		msg = fmt.Sprintf("Request returned a Syscall Error: %s", err)
+		msg = fmt.Sprintf("Request returned a Syscall Error: %s", safeErrorText(err))
 	}
 
-	debugger := fmt.Sprintf("%#v\n", err)
+	debugger := safeErrorText(err)
 	return errorMessage{StatusCode: StatusCode, debugger: debugger, ErrorMsg: msg, Op: op}
 }
 
 func parseError(err error) (errormessage errorMessage) {
-	var op string
+	if err == nil {
+		return createErrorMessage(502, err, "transport")
+	}
 
 	// Check for context.DeadlineExceeded (client timeout)
-	if err == context.DeadlineExceeded {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return createErrorMessage(408, err, "timeout")
 	}
 
+	var timeoutErr net.Error
+	if errors.As(err, &timeoutErr) && timeoutErr.Timeout() {
+		return createErrorMessage(408, err, "timeout")
+	}
+	var phased *transportPhaseError
+	if errors.As(err, &phased) && phased.phase == "tls_handshake" {
+		return createErrorMessage(495, err, "tls_handshake")
+	}
 	httpError := string(err.Error())
 	//todo - clean this up
 
@@ -82,31 +107,31 @@ func parseError(err error) (errormessage errorMessage) {
 
 	status := lastString(strings.Split(httpError, "StatusCode:"))
 	StatusCode, _ := strconv.Atoi(status)
-	if StatusCode != 0 {
+	if StatusCode >= 100 && StatusCode <= 599 {
 		msg, debugger := createErrorString(err)
 		return errorMessage{StatusCode: StatusCode, debugger: debugger, ErrorMsg: msg}
 	}
-	if uerr, ok := err.(*url.Error); ok {
-		if noerr, ok := uerr.Err.(*net.OpError); ok {
-			op = noerr.Op
-			if SyscallError, ok := noerr.Err.(*os.SyscallError); ok {
-				if noerr.Timeout() {
-					return createErrorMessage(408, SyscallError, op)
-				}
-				return createErrorMessage(401, SyscallError, op)
-			} else if AddrError, ok := noerr.Err.(*net.AddrError); ok {
-				return createErrorMessage(405, AddrError, op)
-			} else if DNSError, ok := noerr.Err.(*net.DNSError); ok {
-				return createErrorMessage(421, DNSError, op)
-			} else {
-				return createErrorMessage(421, noerr, op)
-			}
-		}
-		if uerr.Timeout() {
-			return createErrorMessage(408, uerr, op)
-		}
+	var opErr *net.OpError
+	var syscallErr *os.SyscallError
+	var addrErr *net.AddrError
+	var dnsErr *net.DNSError
+	op := "transport"
+	if errors.As(err, &opErr) {
+		op = opErr.Op
 	}
-	return
+	switch {
+	case errors.As(err, &syscallErr):
+		return createErrorMessage(401, err, op)
+	case errors.As(err, &addrErr):
+		return createErrorMessage(405, err, op)
+	case errors.As(err, &dnsErr):
+		return createErrorMessage(421, err, op)
+	case opErr != nil:
+		return createErrorMessage(421, err, op)
+	default:
+		// EOF and unknown errors must never look like a successful status-zero response.
+		return createErrorMessage(502, err, op)
+	}
 }
 
 type errExtensionNotExist struct {

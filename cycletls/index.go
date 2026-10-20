@@ -655,7 +655,7 @@ func dispatcherAsync(res fullRequest, chanWrite chan []byte) {
 			b.WriteByte(byte(parsedError.StatusCode >> 8))
 			b.WriteByte(byte(parsedError.StatusCode))
 
-			var message = parsedError.ErrorMsg + "-> \n" + string(err.Error())
+			var message = parsedError.ErrorMsg
 			var messageLength = len(message)
 
 			b.WriteByte(byte(messageLength >> 8))
@@ -1445,7 +1445,7 @@ func (client CycleTLS) Do(URL string, options Options, Method string) (Response,
 		parsedError := parseError(err)
 		return Response{
 			Status: parsedError.StatusCode,
-			Body:   parsedError.ErrorMsg + " -> " + err.Error(),
+			Body:   parsedError.ErrorMsg,
 		}, nil
 	}
 	defer resp.Body.Close()
