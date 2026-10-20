@@ -115,7 +115,7 @@ jobs:
         with:
           name: npm-package
           path: release/
-      - run: npm publish release/*.tgz --provenance --access public
+      - run: npm publish ./release/*.tgz --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.CYCLETLS }}
       - run: gh release create "$GITHUB_REF_NAME" release/*.tgz release/dist/checksums.txt --verify-tag --generate-notes
