@@ -2,7 +2,7 @@ module github.com/Danny-Dasilva/CycleTLS/src
 
 go 1.24
 
-toolchain go1.24.4
+toolchain go1.24.13
 
 replace github.com/Danny-Dasilva/CycleTLS/cycletls => ../cycletls
 

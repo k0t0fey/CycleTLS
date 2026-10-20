@@ -1,0 +1,123 @@
+name: Fork validation and release
+on:
+  push:
+    branches: ['ic/*']
+    tags: ['v*-ic.*']
+  pull_request:
+    branches: ['ic/*']
+permissions:
+  contents: read
+env:
+  GOTOOLCHAIN: local
+  CGO_ENABLED: '0'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.13'
+          cache-dependency-path: cycletls/go.sum
+      - run: test "$(go env GOVERSION)" = go1.24.13
+      - run: go test ./... -count=1 -timeout=90s
+        working-directory: cycletls
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx tsc
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.13'
+          cache-dependency-path: src/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx tsc
+      - run: node scripts/build-native.mjs
+      - name: Verify reproducible native builds
+        run: |
+          cp dist/checksums.txt expected-checksums.txt
+          node scripts/build-native.mjs
+          cmp expected-checksums.txt dist/checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution
+          path: dist/
+  smoke:
+    needs: build
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+          path: dist/
+      - if: runner.os != 'Windows'
+        run: chmod +x dist/index
+      - run: node scripts/smoke-local.cjs
+  pack:
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+          path: dist/
+      - run: chmod +x dist/index dist/index-arm dist/index-arm64 dist/index-mac dist/index-mac-arm64 dist/index-freebsd
+      - run: npm pack --json > pack.json
+      - run: node scripts/verify-pack.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: |
+            *.tgz
+            dist/checksums.txt
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-ic.')
+    needs: pack
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: https://registry.npmjs.org
+      - name: Verify tag and package version
+        run: node -e 'if(process.env.GITHUB_REF_NAME !== "v"+require("./package.json").version)process.exit(1)'
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: release/
+      - run: npm publish release/*.tgz --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: gh release create "$GITHUB_REF_NAME" release/*.tgz release/dist/checksums.txt --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
