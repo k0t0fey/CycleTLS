@@ -17,9 +17,14 @@ GPL-3.0-only; see LICENSE. Original authorship notices are retained.
   and error prefix. Unknown errors return 502; no error returns status zero.
 - Error responses redact URL credentials and no longer append the raw cause.
 - Release builds package seven pinned native binaries with SHA256 checksums.
+- Since `2.0.5-ic.4`, `http2Fingerprint` sets the initial HTTP/2 SETTINGS frame
+  and connection WINDOW_UPDATE, and its last field sets the pseudo-header order.
+  Upstream parsed the option but fhttp's Navigator preset replaced it on every
+  connection. PRIORITY frames are not parsed; Chrome sends none.
 
-ClientHello/JA3, header ordering, HTTP/2 settings, certificate validation,
-the public JavaScript API, and the WebSocket protocol are unchanged.
+ClientHello/JA3, regular header ordering, HTTP/2 settings when `http2Fingerprint`
+is not set, certificate validation, the public JavaScript API, and the
+WebSocket protocol are unchanged.
 Dependency versions in Go modules are unchanged; only toolchain directives pin
 Go 1.24.13.
 
@@ -34,6 +39,7 @@ The changes are preserved as separate commits for upstream review and rebasing:
 - [Close all idle connections when connection reuse is disabled](https://github.com/k0t0fey/CycleTLS/commit/7de2e764d7a878bb4a57a7d736986ca0bc6b5249)
 - [Cover transport cancellation error envelopes and no-reuse cleanup](https://github.com/k0t0fey/CycleTLS/commit/5fddec306efd19bc0ef2baf532069c45b12c030a)
 - [Build and validate the scoped package with seven pinned helpers](https://github.com/k0t0fey/CycleTLS/commit/018764588133f03018667950047bf6fce996c93a)
+- [Apply http2Fingerprint to HTTP/2 SETTINGS and WINDOW_UPDATE](https://github.com/k0t0fey/CycleTLS/commit/9b9a5dadf64a9f37abeaaf4436239e6b48043a7f)
 
 The initial `2.0.5-ic.2` release is publicly available from npm and GitHub Releases.
 Its public package passed the Linux and Windows consumer checks.
@@ -69,7 +75,7 @@ to the loopback fixture.
 4. Set matching versions in package.json and package-lock.json. Review the diff,
    local tests, seven binary checksums, package contents and Linux/Windows smoke.
 5. Merge without squash to preserve the individual fixes. Create a new immutable
-   tag matching the package version, for example `v2.0.5-ic.3`.
+   tag matching the package version, for example `v2.0.5-ic.4`.
 6. `ic-release.yml` publishes the packed artifact with provenance after all gates
    pass, then creates a GitHub Release containing the tarball and checksums.
    Publication and tags must never be overwritten.
