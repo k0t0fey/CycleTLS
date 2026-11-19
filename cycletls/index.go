@@ -254,7 +254,7 @@ func processRequest(request cycleTLSRequest) (result fullRequest) {
 		}
 
 	}
-	headerOrder := parseUserAgent(request.Options.UserAgent).HeaderOrder
+	headerOrder := pseudoHeaderOrder(request.Options.HTTP2Fingerprint, request.Options.UserAgent)
 
 	//ordering the pseudo headers and our normal headers
 	req.Header = http.Header{
@@ -1429,8 +1429,8 @@ func (client CycleTLS) Do(URL string, options Options, Method string) (Response,
 		return Response{}, err
 	}
 
-	// Set pseudo-header order based on UserAgent - only for HTTP/2, not HTTP/3
-	headerOrder := parseUserAgent(options.UserAgent).HeaderOrder
+	// Set pseudo-header order from the HTTP/2 fingerprint or UserAgent - only for HTTP/2, not HTTP/3
+	headerOrder := pseudoHeaderOrder(options.HTTP2Fingerprint, options.UserAgent)
 	req.Header = http.Header{}
 
 	// Only set PHeaderOrderKey for HTTP/2, not HTTP/3
